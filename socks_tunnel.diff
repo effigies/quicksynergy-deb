@@ -1,0 +1,154 @@
+diff --git a/src/callbacks.c b/src/callbacks.c
+index 1b6d3e7..f970c8c 100644
+--- a/src/callbacks.c
++++ b/src/callbacks.c
+@@ -88,6 +88,10 @@ void entry_changed_cb(GtkEntry *entry, gpointer data) {
+     *((char **) data) = (char *) gtk_entry_get_text(entry);
+ }
+ 
++void checkbox_changed_cb(GtkEntry *entry, gpointer data) {
++    *((int *) data) = gtk_toggle_button_get_active(entry);
++}
++
+ void notebook_page_switched(GtkNotebook *notebook, GtkNotebookPage *page,
+         guint page_num, gpointer user_data) {
+     if(start_button) {
+@@ -210,6 +214,7 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+             state->running = SYNERGY_SERVER_RUNNING;
+         }
+         else if(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) == 1) {
++            char *hostname;
+             save_config(state);
+             
+             cmd = g_strjoin("/", state->synergy_path, "synergyc", NULL);
+@@ -231,14 +236,31 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+                 return;
+             }
+ 
++            if(state->use_socks) {
++                state->tunnel_pid = fork();
++                if(state->tunnel_pid == 0) {
++                    char *tunnel_spec;
++                    asprintf(&tunnel_spec, "localhost:24800:%s:24800",
++                             state->hostname);
++                    execlp("ssh", "ssh", "-N", "-L", tunnel_spec,
++                           state->hostname, NULL);
++                }
++            }
++
+             state->pid = fork();
+ 
+             if(state->pid == 0) {
++                if(state->use_socks && state->tunnel_pid != -1) {
++                    hostname = "localhost";
++                } else {
++                    hostname = state->hostname;
++                }
++
+                 if(!strcmp(state->client_name, "")) {
+-                    execlp(cmd, cmd, "-f", state->hostname, NULL);
++                    execlp(cmd, cmd, "-f", hostname, NULL);
+                 } else {
+                     execlp(cmd, cmd, "-f", "--name", state->client_name,
+-                        state->hostname, NULL);
++                        hostname, NULL);
+                 }
+             }
+             
+@@ -254,6 +276,11 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+         kill(state->pid, SIGTERM);
+ 
+         wait(&status);
++
++        if(state->tunnel_pid > 0) {
++            kill(state->tunnel_pid, SIGTERM);
++            wait(&status);
++        }
+         
+         gtk_button_set_label(GTK_BUTTON(widget), GTK_STOCK_EXECUTE);
+         gtk_widget_set_sensitive(notebook, TRUE);
+diff --git a/src/callbacks.h b/src/callbacks.h
+index 32ff8c6..9cc17bb 100644
+--- a/src/callbacks.h
++++ b/src/callbacks.h
+@@ -30,6 +30,7 @@ enum synergy_mode {
+ gboolean entry_focus_in_event(GtkWidget *widget, GdkEventFocus *event, gpointer data);
+ gboolean entry_focus_out_event(GtkWidget *widget, GdkEventFocus *event, gpointer data);
+ void entry_changed_cb(GtkEntry *entry, gpointer data);
++void checkbox_changed_cb(GtkEntry *entry, gpointer data);
+ void notebook_page_switched(GtkNotebook *notebook, GtkNotebookPage *page, guint page_num, gpointer user_data);
+ void about_button_clicked(GtkWidget *widget, gpointer data);
+ void start_button_clicked(GtkWidget *widget, gpointer data);
+diff --git a/src/synergy_config.c b/src/synergy_config.c
+index 4703221..3b4308b 100644
+--- a/src/synergy_config.c
++++ b/src/synergy_config.c
+@@ -72,6 +72,11 @@ qs_state_t *load_config() {
+          g_key_file_get_value(key_file, "Use", "ClientName", NULL) :
+          "");
+ 
++    state->use_socks =
++        (g_key_file_has_key(key_file, "Use", "SOCKS", NULL) ?
++         g_key_file_get_value(key_file, "Use", "SOCKS", NULL) :
++         0);
++
+     state->synergy_path =
+         (g_key_file_has_key(key_file, "Settings", "SynergyPath", NULL) ?
+          g_key_file_get_value(key_file, "Settings", "SynergyPath", NULL) :
+@@ -115,6 +120,7 @@ void save_config(qs_state_t *state) {
+     g_key_file_set_value(key_file, "Use", "Hostname", state->hostname);
+     
+     g_key_file_set_value(key_file, "Use", "ClientName", state->client_name);
++    g_key_file_set_boolean(key_file, "Use", "SOCKS", state->use_socks);
+     
+     g_key_file_set_value(key_file, "Settings", "SynergyPath",
+         state->synergy_path);
+diff --git a/src/ui.c b/src/ui.c
+index 51d05a0..5f2f5be 100644
+--- a/src/ui.c
++++ b/src/ui.c
+@@ -101,6 +101,7 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+     GtkWidget *vbox, *vbox1;
+     GtkWidget *label;
+     GtkWidget *entry;
++    GtkWidget *checkbox;
+     
+     /* client's vbox */
+     vbox1 = gtk_vbox_new(FALSE, 18);
+@@ -122,6 +123,13 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+     /* update state information when text changes */
+     g_signal_connect(G_OBJECT(entry), "changed",
+         G_CALLBACK(entry_changed_cb), (gpointer) &state->hostname);
++
++    checkbox = gtk_check_button_new_with_label(_("SOCKS"));
++    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checkbox), state->use_socks);
++    gtk_box_pack_start(GTK_BOX(vbox), checkbox, FALSE, FALSE, 0);
++
++    g_signal_connect(G_OBJECT(checkbox), "toggled",
++        G_CALLBACK(checkbox_changed_cb), (gpointer) &state->use_socks);
+     
+     /* screen name */
+     vbox = gtk_vbox_new(FALSE, 6);
+@@ -139,7 +147,7 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+     /* update state information when text changes */
+     g_signal_connect(G_OBJECT(entry), "changed",
+         G_CALLBACK(entry_changed_cb), (gpointer) &state->client_name);
+-    
++
+     return vbox1;
+ }
+ 
+diff --git a/src/ui.h b/src/ui.h
+index bf36b88..febbc68 100644
+--- a/src/ui.h
++++ b/src/ui.h
+@@ -32,7 +32,9 @@ typedef struct qs_state {
+     gchar *synergy_path;
+     gchar *client_name;
+     int running;
++    int use_socks;
+     pid_t pid;
++    pid_t tunnel_pid;
+ } qs_state_t;
+ 
+ GdkPixbuf *make_logo(void);
