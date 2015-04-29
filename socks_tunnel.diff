@@ -1,5 +1,5 @@
 diff --git a/src/callbacks.c b/src/callbacks.c
-index 1b6d3e7..f970c8c 100644
+index 1b6d3e7..758f2f2 100644
 --- a/src/callbacks.c
 +++ b/src/callbacks.c
 @@ -88,6 +88,10 @@ void entry_changed_cb(GtkEntry *entry, gpointer data) {
@@ -55,7 +55,13 @@ index 1b6d3e7..f970c8c 100644
                  }
              }
              
-@@ -254,6 +276,11 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+@@ -251,14 +273,20 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+         gtk_widget_set_sensitive(notebook, FALSE);
+     }
+     else {
++        /* Prevent multiple entry */
++        state->running = 0;
++
          kill(state->pid, SIGTERM);
  
          wait(&status);
@@ -67,6 +73,11 @@ index 1b6d3e7..f970c8c 100644
          
          gtk_button_set_label(GTK_BUTTON(widget), GTK_STOCK_EXECUTE);
          gtk_widget_set_sensitive(notebook, TRUE);
+-        
+-        state->running = 0;
+     }
+ }
+ 
 diff --git a/src/callbacks.h b/src/callbacks.h
 index 32ff8c6..9cc17bb 100644
 --- a/src/callbacks.h
@@ -79,6 +90,32 @@ index 32ff8c6..9cc17bb 100644
  void notebook_page_switched(GtkNotebook *notebook, GtkNotebookPage *page, guint page_num, gpointer user_data);
  void about_button_clicked(GtkWidget *widget, gpointer data);
  void start_button_clicked(GtkWidget *widget, gpointer data);
+diff --git a/src/main.c b/src/main.c
+index 653fa93..1263059 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -20,6 +20,7 @@
+ 
+ #include <stdlib.h>
+ #include <sys/types.h>
++#include <signal.h>
+ #include <gtk/gtk.h>
+ #include <gdk-pixbuf/gdk-pixbuf.h>
+ #include "callbacks.h"
+@@ -142,6 +143,13 @@ int main(int argc, char **argv) {
+ 
+     /* display the main window */   
+     gtk_widget_show_all(main_window);
++
++    /* Treat terminated children as stop button presses*/
++    void stop_on_sigchld(int num) {
++        if (state->running)
++            start_button_clicked(G_OBJECT(start_button), (gpointer) state);
++    }
++    signal(SIGCHLD, stop_on_sigchld);
+     
+     /* GTK mainloop */
+     gtk_main();
 diff --git a/src/synergy_config.c b/src/synergy_config.c
 index 4703221..3b4308b 100644
 --- a/src/synergy_config.c
