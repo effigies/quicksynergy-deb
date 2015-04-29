@@ -15,10 +15,12 @@ pushd build
         quilt push
         quilt import ../../socks_tunnel.diff
         quilt pop
+        cat ../../changelog debian/changelog > debian/changelog.new
+        mv debian/changelog.new debian/changelog
         pushd
             dpkg-source -b quicksynergy-0.9
         pushd
-        dpkg-buildpackage -b -uc -us -nc
+        dpkg-buildpackage -uc -us
     popd
     cp quicksynergy_0.9-*.deb ..
 popd

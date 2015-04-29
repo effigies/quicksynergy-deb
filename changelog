@@ -1,0 +1,7 @@
+quicksynergy (0.9-1ubuntu2) oneiric; urgency=low
+
+  * debian/patches: add socks_tunnel.diff for SOCKS tunnel support
+  * Catch child process termination
+
+ -- Chris Markiewicz <effigies@gmail.com>  Wed, 29 Apr 2015 13:13:00 -0400
+
