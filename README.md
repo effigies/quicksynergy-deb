@@ -7,7 +7,7 @@ to use a SOCKS tunnel instead of a direct connection.
 Typical use:
 
     ./buildpkg.sh
-    sudo dpkg -i quicksynergy_0.9-1ubuntu1_amd64.deb
+    sudo dpkg -i quicksynergy_0.9-1ubuntu2_amd64.deb
 
 Note that the script does call `sudo apt-get build-dep`, but otherwise
 operates without privileges.

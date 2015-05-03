@@ -1,5 +1,5 @@
 diff --git a/src/callbacks.c b/src/callbacks.c
-index 1b6d3e7..758f2f2 100644
+index 1b6d3e7..aa893ef 100644
 --- a/src/callbacks.c
 +++ b/src/callbacks.c
 @@ -88,6 +88,10 @@ void entry_changed_cb(GtkEntry *entry, gpointer data) {
@@ -13,7 +13,23 @@ index 1b6d3e7..758f2f2 100644
  void notebook_page_switched(GtkNotebook *notebook, GtkNotebookPage *page,
          guint page_num, gpointer user_data) {
      if(start_button) {
-@@ -210,6 +214,7 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+@@ -199,8 +203,13 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+             state->pid = fork();
+         
+             if(state->pid == 0) {
+-                execlp(cmd, cmd, "-f", "--config",
+-                    ".quicksynergy/synergy.conf", NULL);
++                if (state->req_tunnel) {
++                    execlp(cmd, cmd, "-f", "-a", "127.0.1.1", "--config",
++                        ".quicksynergy/synergy.conf", NULL);
++                } else {
++                    execlp(cmd, cmd, "-f", "--config",
++                        ".quicksynergy/synergy.conf", NULL);
++                }
+             }
+             
+             g_free(cmd);
+@@ -210,6 +219,7 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
              state->running = SYNERGY_SERVER_RUNNING;
          }
          else if(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) == 1) {
@@ -21,7 +37,7 @@ index 1b6d3e7..758f2f2 100644
              save_config(state);
              
              cmd = g_strjoin("/", state->synergy_path, "synergyc", NULL);
-@@ -231,14 +236,31 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+@@ -231,14 +241,31 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
                  return;
              }
  
@@ -55,7 +71,7 @@ index 1b6d3e7..758f2f2 100644
                  }
              }
              
-@@ -251,14 +273,20 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
+@@ -251,14 +278,20 @@ void start_button_clicked(GtkWidget *widget, gpointer data) {
          gtk_widget_set_sensitive(notebook, FALSE);
      }
      else {
@@ -117,10 +133,22 @@ index 653fa93..1263059 100644
      /* GTK mainloop */
      gtk_main();
 diff --git a/src/synergy_config.c b/src/synergy_config.c
-index 4703221..3b4308b 100644
+index 4703221..e1ac4c6 100644
 --- a/src/synergy_config.c
 +++ b/src/synergy_config.c
-@@ -72,6 +72,11 @@ qs_state_t *load_config() {
+@@ -62,6 +62,11 @@ qs_state_t *load_config() {
+          g_key_file_get_value(key_file, "Share", "Right", NULL) :
+          _("Right"));
+ 
++    state->req_tunnel =
++        (g_key_file_has_key(key_file, "Require", "Tunnel", NULL) ?
++         g_key_file_get_value(key_file, "Require", "Tunnel", NULL) :
++         0);
++
+     state->hostname =
+         (g_key_file_has_key(key_file, "Use", "Hostname", NULL) ?
+          g_key_file_get_value(key_file, "Use", "Hostname", NULL) :
+@@ -72,6 +77,11 @@ qs_state_t *load_config() {
           g_key_file_get_value(key_file, "Use", "ClientName", NULL) :
           "");
  
@@ -132,7 +160,12 @@ index 4703221..3b4308b 100644
      state->synergy_path =
          (g_key_file_has_key(key_file, "Settings", "SynergyPath", NULL) ?
           g_key_file_get_value(key_file, "Settings", "SynergyPath", NULL) :
-@@ -115,6 +120,7 @@ void save_config(qs_state_t *state) {
+@@ -111,10 +121,12 @@ void save_config(qs_state_t *state) {
+     if(g_strcmp0(state->right, _("Right"))) {
+         g_key_file_set_value(key_file, "Share", "Right", state->right);
+     }
++    g_key_file_set_boolean(key_file, "Require", "Tunnel", state->req_tunnel);
+ 
      g_key_file_set_value(key_file, "Use", "Hostname", state->hostname);
      
      g_key_file_set_value(key_file, "Use", "ClientName", state->client_name);
@@ -141,10 +174,50 @@ index 4703221..3b4308b 100644
      g_key_file_set_value(key_file, "Settings", "SynergyPath",
          state->synergy_path);
 diff --git a/src/ui.c b/src/ui.c
-index 51d05a0..5f2f5be 100644
+index 56c21d2..86a3c22 100644
 --- a/src/ui.c
 +++ b/src/ui.c
-@@ -101,6 +101,7 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+@@ -54,15 +54,28 @@ GtkWidget *screen_entry_new(char **textp, const char *position) {
+ 
+ GtkWidget *make_server_tab(qs_state_t *state) {
+     GtkWidget *table;
++    GtkWidget *vbox1;
++    GtkWidget *checkbox;
+     GtkWidget *image;
+     GtkWidget *above_entry;
+     GtkWidget *below_entry;
+     GtkWidget *left_entry;
+     GtkWidget *right_entry;
+     
++    vbox1 = gtk_vbox_new(FALSE, 18);
++    gtk_container_set_border_width(GTK_CONTAINER(vbox1), 12);
++
+     /* build the table that will hold the server layout widgets */
+     table = gtk_table_new(3, 3, TRUE);
+-    gtk_container_set_border_width(GTK_CONTAINER(table), 12);
++    gtk_box_pack_start(GTK_BOX(vbox1), table, FALSE, FALSE, 0);
++
++    /* Checkbox to require local/tunneled connections only */
++    checkbox = gtk_check_button_new_with_label(_("Tunneled Only"));
++    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checkbox), state->req_tunnel);
++    gtk_box_pack_start(GTK_BOX(vbox1), checkbox, FALSE, FALSE, 0);
++
++    g_signal_connect(G_OBJECT(checkbox), "toggled",
++        G_CALLBACK(checkbox_changed_cb), (gpointer) &state->req_tunnel);
+     
+     /* text entries for server configuration */
+     above_entry = screen_entry_new(&state->above, _("Above"));
+@@ -79,14 +92,15 @@ GtkWidget *make_server_tab(qs_state_t *state) {
+     /* image to be displayed in the center of the main window */
+     image = gtk_image_new_from_stock(GTK_STOCK_HOME, GTK_ICON_SIZE_DIALOG);
+     gtk_table_attach_defaults(GTK_TABLE(table), image, 1, 2, 1, 2);
+-    
+-    return table;
++
++    return vbox1;
+ }
+ 
+ GtkWidget *make_client_tab(qs_state_t *state) {
      GtkWidget *vbox, *vbox1;
      GtkWidget *label;
      GtkWidget *entry;
@@ -152,7 +225,7 @@ index 51d05a0..5f2f5be 100644
      
      /* client's vbox */
      vbox1 = gtk_vbox_new(FALSE, 18);
-@@ -122,6 +123,13 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+@@ -108,6 +122,13 @@ GtkWidget *make_client_tab(qs_state_t *state) {
      /* update state information when text changes */
      g_signal_connect(G_OBJECT(entry), "changed",
          G_CALLBACK(entry_changed_cb), (gpointer) &state->hostname);
@@ -166,7 +239,7 @@ index 51d05a0..5f2f5be 100644
      
      /* screen name */
      vbox = gtk_vbox_new(FALSE, 6);
-@@ -139,7 +147,7 @@ GtkWidget *make_client_tab(qs_state_t *state) {
+@@ -125,7 +146,7 @@ GtkWidget *make_client_tab(qs_state_t *state) {
      /* update state information when text changes */
      g_signal_connect(G_OBJECT(entry), "changed",
          G_CALLBACK(entry_changed_cb), (gpointer) &state->client_name);
@@ -176,14 +249,15 @@ index 51d05a0..5f2f5be 100644
  }
  
 diff --git a/src/ui.h b/src/ui.h
-index bf36b88..febbc68 100644
+index bf36b88..ecf05ba 100644
 --- a/src/ui.h
 +++ b/src/ui.h
-@@ -32,7 +32,9 @@ typedef struct qs_state {
+@@ -32,7 +32,10 @@ typedef struct qs_state {
      gchar *synergy_path;
      gchar *client_name;
      int running;
 +    int use_socks;
++    int req_tunnel;
      pid_t pid;
 +    pid_t tunnel_pid;
  } qs_state_t;
